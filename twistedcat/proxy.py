@@ -1,3 +1,4 @@
+import binascii
 from twisted.protocols import basic
 from twisted.internet import protocol
 from twisted.internet.interfaces import IStreamClientEndpoint, IStreamServerEndpoint
@@ -5,24 +6,44 @@ from twisted.internet.interfaces import IStreamClientEndpoint, IStreamServerEndp
 ALLOWED = """
 PROTOCOLINFO
 250-PROTOCOLINFO 1
-250-AUTH METHODS=COOKIE,SAFECOOKIE COOKIEFILE="/var/run/tor/control.authcookie"
 250-VERSION Tor="0.2.6.10"
+250 ControlPort
 250 OK
+250-AUTH METHODS=COOKIE,SAFECOOKIE COOKIEFILE="/var/run/tor/control.authcookie"
+GETCONF ExitPolicy
+GETINFO address
+GETCONF ORPort
+GETCONF DirPort
+GETCONF BandwidthRate
+GETINFO traffic/read
+GETINFO traffic/written
+GETCONF ControlPort
+GETCONF BandwidthBurst
+GETINFO fingerprint
+GETCONF Nickname
+.
 """.strip().split("\n")
 
 ALLOWED_PREFIXES = """
 650 BW
 AUTHENTICATE
-GETCONF BandwidthRate
+GETINFO ns/id/
+250+ns/id/
+r 
+s 
+w 
+p 
+250-fingerprint=
+250 Nickname=
+250 ORPort=
+250 DirPort=
 250 BandwidthRate=
-GETCONF BandwidthBurst
+250-address=
 250 BandwidthBurst=
-GETINFO traffic/read
 250-traffic/read=
-GETINFO traffic/written
 250-traffic/written=
-GETCONF ControlPort
-250 ControlPort=9951
+250 ControlPort=
+250 ExitPolicy=
 """.strip().split("\n")
 
 REPLACEMENTS = {
@@ -31,6 +52,9 @@ REPLACEMENTS = {
 }
 
 FILTER = True
+
+with open("/var/run/tor/control.authcookie", "rb") as f:
+    AUTH_COOKIE = binascii.hexlify(f.read(32))
 
 class LineProxyEndpointProtocol(basic.LineReceiver):
     noisy = True
@@ -44,9 +68,14 @@ class LineProxyEndpointProtocol(basic.LineReceiver):
         allow = False
         if FILTER == False:
             print "%s: %r" % (self.label, line)
+            if line.startswith('AUTHENTICATE'):
+                line = "AUTHENTICATE %s" % (AUTH_COOKIE,)
             self.peer.transport.write(line + self.delimiter)
             return
-        if line in REPLACEMENTS:
+        if line.startswith('AUTHENTICATE'):
+            line = "AUTHENTICATE %s" % (AUTH_COOKIE,)
+            allow = True
+        elif line in REPLACEMENTS:
             print "%s replacing %r with %r" % (self.label, line, REPLACEMENTS[line])
             line = REPLACEMENTS[line]
             allow = True
